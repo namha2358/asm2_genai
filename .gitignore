@@ -9,3 +9,9 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Downloaded CIFAR10 dataset (~170 MB, not committed)
+data/
+
+# Local test image
+test_image.png

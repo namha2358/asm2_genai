@@ -1,3 +1,6 @@
 .venv
 __pycache__
 .git
+data
+test_image.png
+train_cnn.py
