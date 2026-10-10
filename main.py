@@ -1,13 +1,14 @@
 # main.py
-from fastapi import FastAPI, HTTPException   # HTTPException lets us return proper error codes
-from pydantic import BaseModel               # for validating request bodies
+from fastapi import FastAPI, HTTPException, UploadFile, File   # HTTPException = proper error codes; UploadFile/File = image uploads
+from pydantic import BaseModel                                 # for validating request bodies
 
-from app.bigram_model import BigramModel     # existing bigram logic
-from app.embeddings import EmbeddingModel    # spaCy embedding logic
+from app.bigram_model import BigramModel       # bigram logic
+from app.embeddings import EmbeddingModel      # spaCy embedding logic
+from app.classifier import predict             # CNN image classification
 
 app = FastAPI()
 
-# Bigram model  
+# Bigram model
 corpus = [
     "The Count of Monte Cristo is a novel written by Alexandre Dumas. \
 It tells the story of Edmond Dantès, who is falsely imprisoned and later seeks revenge.",
@@ -17,19 +18,18 @@ It tells the story of Edmond Dantès, who is falsely imprisoned and later seeks 
 ]
 bigram_model = BigramModel(corpus)
 
-# Embedding model 
-# Created once at startup so every request reuses the loaded spaCy model
+# Embedding model
 embedding_model = EmbeddingModel("en_core_web_lg")
 
 
-# Request schemas 
+# Request schemas
 class TextGenerationRequest(BaseModel):
     start_word: str
     length: int
 
 
 class EmbeddingRequest(BaseModel):
-    word: str                                # the query word to embed
+    word: str                                  # the query word to embed
 
 
 class SimilarityRequest(BaseModel):
@@ -37,7 +37,7 @@ class SimilarityRequest(BaseModel):
     word2: str
 
 
-# ---------- Endpoints ----------
+# Endpoints 
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
@@ -51,22 +51,40 @@ def generate_text(request: TextGenerationRequest):
 
 @app.post("/embedding")
 def get_embedding(request: EmbeddingRequest):
-    # reject empty input so we don't return a meaningless vector
+    # reject empty input 
     if not request.word.strip():
         raise HTTPException(status_code=422, detail="word must not be empty")
-    # reject words spaCy has no vector for (otherwise we'd return 300 zeros)
+    # reject words spaCy has no vector for 
     if not embedding_model.has_vector(request.word):
         raise HTTPException(status_code=404, detail="No embedding found for this word")
 
     vector = embedding_model.get_embedding(request.word)
     return {
         "word": request.word,
-        "dimension": len(vector),            
+        "dimension": len(vector),
         "embedding": vector,
     }
 
 
-@app.post("/similarity")                     # bonus endpoint
+@app.post("/similarity")                       # bonus endpoint
 def get_similarity(request: SimilarityRequest):
     score = embedding_model.get_similarity(request.word1, request.word2)
     return {"word1": request.word1, "word2": request.word2, "similarity": score}
+
+
+# Image classifier 
+# POST /classify: upload an image file, get back the predicted CIFAR10 class
+@app.post("/classify")
+async def classify_image(file: UploadFile = File(...)):
+    # Reject anything that isn't an image
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Please upload an image file.")
+
+    # Read the uploaded bytes and hand them to the model
+    image_bytes = await file.read()
+    try:
+        result = predict(image_bytes)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not read the uploaded image.")
+
+    return {"filename": file.filename, **result}
